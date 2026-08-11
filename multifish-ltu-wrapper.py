@@ -84,7 +84,7 @@ def updateLTUParameters(resampledSequences, periodHistory, driftHistory,  shifts
 
 def getLTUParameters(fishIndex):
     if (isFishProfileInOracle(fishIndex) == True):
-        ltuTuple = (multifishOracle[fishIndex][keys] for keys in ['resampledSequences', 'periodHistory','driftHistory', 'shifts'])
+        ltuTuple = tuple(multifishOracle[fishIndex][key] for key in ['resampledSequences', 'periodHistory','driftHistory', 'shifts'])
     else:
         print(f'Fish Index {fishIndex} is not in oracle. Will add new entry and return requested parameters')
         addFishToOracle(fishIndex)
