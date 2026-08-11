@@ -61,7 +61,7 @@ def processNewReferenceSequence(rawRefFrames,
                     -1000.0,
                     None)
     # And that shape is compatible with the history that we already have
-    if len(resampledSequences) > 1:
+    if len(resampledSequences) >= 1:
         if rawRefFrames[0].shape != resampledSequences[0][0].image.shape:
             # There is a shape mismatch.
             if log:

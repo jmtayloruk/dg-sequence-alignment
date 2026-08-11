@@ -77,7 +77,7 @@ def processNewReferenceSequence(rawRefFrames,
                     -1000.0,
                     None)
     # And that shape is compatible with the history that we already have
-    if len(resampledSequences) > 1:
+    if len(resampledSequences) >= 1:
         if rawRefFrames[0].shape != resampledSequences[0][0].shape:
             # There is a shape mismatch.
             if log:
@@ -200,7 +200,7 @@ def RoIForReferenceHistory(resampledSequences):
     # We presume all have the same size (caller really should ensure this, or we will run into major problems!)
     if (len(resampledSequences) == 0):
         return (-1, -1)
-    return resampledSequences[0][0].image.shape
+    return resampledSequences[0][0].shape
 
 def trimLTUHistory(resampledSequences,
                     periodHistory,
