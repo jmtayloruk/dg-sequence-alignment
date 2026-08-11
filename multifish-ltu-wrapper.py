@@ -128,10 +128,10 @@ def RoIForReferenceHistory(fishIndex = 0):
 # Additional functions used by the LTU app
 # ===================================================================================
 '''
-These are additional functions that either needed to be implemented for multifish imaging (resetMultifishOracle, and clearMultifishOracle)
-The other two functions, numRefFrameSetsInHistory and resetRefFrameHistory, were previously methods belonging to PythonService.
-But since resampledSequences, periodHistory, driftHistory, and shifts are now only tracked on the python side then resampledSequences doesn't exist in the Obj C.
-So these functions are implemented here and are called by the Obj C side. The Obj C side requires each function return something so I return 1. 
+numRefFrameSetsInHistory and resetRefFrameHistory, were previously methods belonging to PythonService.
+But since resampledSequences, periodHistory, driftHistory, and shifts are now only tracked on the python side,
+resampledSequences doesn't exist in the Obj C.
+So these functions are implemented here and are called by the Obj C side. 
 '''
 
 def numRefFrameSetsInHistory(fishIndex = 0):
@@ -142,14 +142,3 @@ def numRefFrameSetsInHistory(fishIndex = 0):
 def resetRefFrameHistory(fishIndex = 0):
     # set the parameters for that entry in the oracle to an empty list
     updateLTUParameters([],[],[],[], fishIndex)
-
-def resetMultifishOracle():
-    # set parameters for each entry in the oracle to an empty list but NOT delete them
-    for keys in multifishOracle.keys():
-        resetRefFrameHistory(keys)
-
-def clearMultifishOracle():
-    # delete every entry in the oracle EXCPEPT the "0" entry. 
-    # The parameters for this entry are just reset to empty lists.
-    for keys in multifishOracle.keys():
-        removeFishFromOracle(keys)
