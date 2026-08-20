@@ -134,6 +134,7 @@ def processNewReferenceSequence(rawRefFrames,
                                              resampledSequences[-1],
                                              drift)
                 print(f'Drift correcting ({i}): {driftHistory[-1]}, {driftHistory[i]}. New shapes {seq1.shape}, {seq2.shape}')
+                sys.stdout.flush()      # Flush stdout to help debug an exception (probably drift-related) inside this function call
                 alignment1, alignment2, rollFactor, score = scc.crossCorrelationRolling(seq1,
                                                                                         seq2,
                                                                                         numSamplesPerPeriod,
@@ -225,6 +226,33 @@ def trimLTUHistory(resampledSequences,
     return resampledSequences,periodHistory,driftHistory,shifts
 
 if __name__ == '__main__':
+    # Quick test with dummy data, testing different drift values to make sure we don't run into problems at high drift
+    rawRefFrames = np.random.randint(1, 255, (80,142,163)).astype(np.float64)
+    thisPeriod = 80.0
+    thisDrift = (10,10)
+    
+    # Test with increasing drift
+    driftRangeX = list(range(160,170)) + list(range(-170,-159))
+    driftRangeY = list(range(135,147)) + list(range(-147,-135))
+    for dy in driftRangeY:
+        print(f"Test with drift {dy}")
+        resampledSequences = [np.random.randint(1, 255, (80,142,163)).astype(np.float64)]
+#        thisDrift = (dx, 0)
+        thisDrift = (0, dy)
+        periodHistory = [80.0]
+        driftHistory = [(0,0)]
+        shifts = []
+        processNewReferenceSequence(rawRefFrames,
+                                    thisPeriod,
+                                    thisDrift,
+                                    resampledSequences,
+                                    periodHistory,
+                                    driftHistory,
+                                    shifts)
+    exit(0)
+
+
+
     print('Running toy example...This is STILL BROKEN')
     numStacks = 10
     stackLength = 10
