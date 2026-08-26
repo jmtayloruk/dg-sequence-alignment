@@ -18,77 +18,84 @@ numSamplesPerPeriod = 60
 # ===================================================================================
 '''
 The Multifish oracle is just a nested dict where the inner dict tracks parameters of the long-term updater for a single fish. 
-The outer dict collects these into the oracle^TM. For each fish theres is a key "N" where N is the fishIndex in spimGUI 
+The outer dict collects these into the oracle^TM. For each fish theres is a key "N" where N is the uniqueFishID in spimGUI 
 and the value is the inner dict of LTU parameters.
-The various helper functions should ensure that behaviour is "mostly" consistent with how the settingsForFish container is handled
-in the main spimGUI in that entries can be added and removed (controlled by the main app) BUT there is always an entry for 
-fishIndex = 0 ("0"). This means you can still record a timelapse for a single fish.
+The Spim GUI should be responsible for making sure addFishToOracleIfNeeded is called whenever a new fish profile is created.
+That means we can print an "Unexpected: ..." message if we ever find a uniqueFishID is missing from (or present in) the oracle
+when we do not expect that. But we will handle that, so the Spim GUI shouldn't see any impact
+(beyond potentially degradation of LTU performance for that fish).
+Because the Spim GUI always ensures it has at least one fish profile, this oracle should operate transparently even when capturing a single-fish timelapse.
 '''
 
 # blank dict of LTU parameters that we only ever copy from and never update.
-LTUParameterDict = { 'resampledSequences' : [],
-                     'periodHistory' : [],
-                     'driftHistory' : [],
-                     'shifts' : []}
+blankLTUParameterDict = { 'resampledSequences' : [],
+                          'periodHistory' : [],
+                          'driftHistory' : [],
+                          'shifts' : []}
 
-# the nested dict / oracle containing the LTU parameters for multiple fish. There will always be an entry with key "0"
-multifishOracle = {0 : dict(LTUParameterDict)}
+# The nested dict / oracle containing the LTU parameters for multiple fish.
+# At startup we will not have any entries, but at least one should be added by the Spim GUI during its own startup
+multifishOracle = dict()
 
 # helper functions that are not called by the LTU App
-def isFishProfileInOracle(fishIndex):
-    return (fishIndex in multifishOracle.keys())
+def isFishProfileInOracle(uniqueFishID):
+    return (uniqueFishID in multifishOracle.keys())
 
-def addFishToOracle(fishIndex):
-    if (isFishProfileInOracle(fishIndex) == False):
-        multifishOracle[fishIndex] = dict(LTUParameterDict)
+def addFishToOracle(uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == False):
+        multifishOracle[uniqueFishID] = dict(blankLTUParameterDict)
+    else:
+        print(f'Unexpected: unique fish ID {uniqueFishID} is already in oracle')
+    sys.stdout.flush()
+    
+def addFishToOracleIfNeeded(uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == False):
+        print(f'Adding unique fish ID {uniqueFishID} to the oracle')
+        multifishOracle[uniqueFishID] = dict(blankLTUParameterDict)
+    else:
+        print(f'For information: unique fish ID {uniqueFishID} is already in oracle')
+    sys.stdout.flush()
 
-def removeFishFromOracle(fishIndex):
-    # removing a fish from the oracle removes the entry at that key but also decrements the key number by one to match the behaviour of the spimGUI obj C side
-    # im mostly just going to copy the logic of the SpimApplication.removeFish method
-    fishIndices = sorted(keys for keys in multifishOracle.keys())
-    maxFishIndex = max(fishIndices)
-    numFishInOracle = len(fishIndices)
-    if (isFishProfileInOracle(fishIndex) == False):
-        # This fish index is not in the oracle. That is not necessarily a problem,
+def removeFishFromOracle(uniqueFishID):
+    # To remove a fish from the oracle we remove the entry for that key.
+    # Because the uniqueFishID is decoupled from the fishIndex in the Spim GUI,
+    # we don't need to shuffle anything else around.
+    uniqueFishIDs = sorted(keys for keys in multifishOracle.keys())
+    numFishInOracle = len(uniqueFishIDs)
+    if (isFishProfileInOracle(uniqueFishID) == False):
+        # This fish ID is not in the oracle. That is not necessarily a problem,
         # it may just mean that no sync has been performed for that fish, even though
         # the fish was defined within the Spim GUI.
-        print(f"Fish index {fishIndex} is not in oracle.")
-    elif (numFishInOracle == 1):
-        # there is only one fish in the oracle. If all rules have been followed this will be index 0
-        print(f"We can't delete the only entry in the oracle. Resetting the LTU parameters instead for fish index {fishIndex}")
-        assert(fishIndex == 0)
-        updateLTUParameters([],[],[],[], fishIndex)
-    elif (fishIndex == maxFishIndex):
-        # if its the final entry we want to remove just delete it
-        del multifishOracle[fishIndex]
+        print(f'Asked to delete unique fish ID {uniqueFishID} but it is not in oracle')
     else:
-        # shuffle all the entries down by updating each entry with the LTU parameters from the entry above and deleting the final entry
-        # again we're relying on nothing fishy happening and that there are continuous indices from fishIndex to maxIndex
-        for k in range(fishIndex, maxFishIndex,1):
-            updateLTUParameters(*getLTUParameters(k+1), k)
-        # delete final entry because there is no successor to update LTUparameters from.
-        del multifishOracle[maxFishIndex]
+        # Delete this entry from the oracle
+        print(f'Deleting unique fish ID {uniqueFishID} from oracle')
+        del multifishOracle[uniqueFishID]
+    sys.stdout.flush()
 
-def updateLTUParameters(resampledSequences, periodHistory, driftHistory,  shifts, fishIndex):
-    if(isFishProfileInOracle(fishIndex) == True):
+def updateLTUParameters(resampledSequences, periodHistory, driftHistory,  shifts, uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == True):
+        print(f'Updating LTU parameters for unique fish ID {uniqueFishID}')
         parameterDict = {   'resampledSequences' : resampledSequences,
                             'periodHistory' : periodHistory,
                             'driftHistory' : driftHistory,
                             'shifts' : shifts
                          }
-        multifishOracle[fishIndex] = parameterDict
+        multifishOracle[uniqueFishID] = parameterDict
     else:
-        print(f'Fish Index {fishIndex} is not in oracle. Will add new entry and update parameters')
-        addFishToOracle(fishIndex)
-        updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, fishIndex)
+        print(f'Unexpected: unique fish ID {uniqueFishID} is not in oracle. Will add new entry and update parameters')
+        addFishToOracle(uniqueFishID)
+        updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID)
+    sys.stdout.flush()
 
-def getLTUParameters(fishIndex):
-    if (isFishProfileInOracle(fishIndex) == True):
-        ltuTuple = tuple(multifishOracle[fishIndex][key] for key in ['resampledSequences', 'periodHistory','driftHistory', 'shifts'])
+def getLTUParameters(uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == True):
+        ltuTuple = tuple(multifishOracle[uniqueFishID][key] for key in ['resampledSequences', 'periodHistory','driftHistory', 'shifts'])
     else:
-        print(f'Fish Index {fishIndex} is not in oracle. Will add new entry and return requested parameters')
-        addFishToOracle(fishIndex)
-        ltuTuple = getLTUParameters(fishIndex)
+        print(f'Unexpected: unique fish ID {uniqueFishID} was queried but is not in oracle. Will add new entry and return requested (empty) parameters')
+        addFishToOracle(uniqueFishID)
+        ltuTuple = getLTUParameters(uniqueFishID)
+    sys.stdout.flush()
     return ltuTuple
 
 
@@ -101,26 +108,31 @@ the addition of interfacing with the multifish oracle. Each of these functions f
 combine with new data coming in from the Obj C side and pass to the old MemoryCC functions; update LTUparameters in the oracle; return required parameters back to the Obj C side.
 '''
 
-def processNewReferenceSequence(rawFrames, thisPeriod, thisDrift,  knownPhaseIndex,knownPhase, maxOffsetToConsider, fishIndex = 0):
-    
-    ltuParameters = getLTUParameters(fishIndex)
+def processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, knownPhaseIndex, knownPhase, maxOffsetToConsider, uniqueFishID):
+    print(f'processNewReferenceSequence for unique fish ID {uniqueFishID}')
+    ltuParameters = getLTUParameters(uniqueFishID)
     # we never actually use the residuals that get returned. Only the shiftSolution actually need by the LTU helper app
     resampledSequences, periodHistory, driftHistory, shifts, shiftSolution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, knownPhaseIndex, knownPhase, numSamplesPerPeriod, maxOffsetToConsider)
-    updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, fishIndex)
+    updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID)
+    print(f'processNewReferenceSequence completed for unique fish ID {uniqueFishID} (result {shiftSolution})')
+    sys.stdout.flush()
     return shiftSolution
 
-def trimLTUHistory(trimToLength, fishIndex = 0):
-    ltuParameters = getLTUParameters(fishIndex)
+def trimLTUHistory(trimToLength, uniqueFishID):
+    print(f'Trim LTU history for fish {uniqueFishID}')
+    ltuParameters = getLTUParameters(uniqueFishID)
     returnTuple = mcc.trimLTUHistory(*ltuParameters, trimToLength)
-    updateLTUParameters(*returnTuple,fishIndex)
+    updateLTUParameters(*returnTuple,uniqueFishID)
+    sys.stdout.flush()
 
-def RoIForReferenceHistory(fishIndex = 0):
+def RoIForReferenceHistory(uniqueFishID):
     # this function only needs a reference to resampledSequences so I'm not going to call the updater
     # The tuple (-1,-1) is returned if the length of resampledSequences we pass in is zero.
-    # If the fish index doesn't exist then I think we should still create an entry in the oracle then recall the function.
+    # If the fish ID doesn't exist then I think we should still create an entry in the oracle then recall the function.
     # This will still return (-1,-1) back to the obj C side BUT we wont crash by reading a non existent entry in the oracle.
-    ltuParameters = getLTUParameters(fishIndex)
+    ltuParameters = getLTUParameters(uniqueFishID)
     roi = mcc.RoIForReferenceHistory(ltuParameters[0])
+    sys.stdout.flush()
     return roi
 
 
@@ -134,11 +146,12 @@ resampledSequences doesn't exist in the Obj C.
 So these functions are implemented here and are called by the Obj C side. 
 '''
 
-def numRefFrameSetsInHistory(fishIndex = 0):
+def numRefFrameSetsInHistory(uniqueFishID):
     # Return number of sets of reference sequences in the list of resampledSequences
-    resampledSequences ,_ ,_, _= getLTUParameters(fishIndex)
+    resampledSequences ,_ ,_, _= getLTUParameters(uniqueFishID)
     return len(resampledSequences)
 
-def resetRefFrameHistory(fishIndex = 0):
+def resetRefFrameHistory(uniqueFishID):
     # set the parameters for that entry in the oracle to an empty list
-    updateLTUParameters([],[],[],[], fishIndex)
+    print(f'Reset ref frame history for fish {uniqueFishID}')
+    updateLTUParameters([],[],[],[], uniqueFishID)
