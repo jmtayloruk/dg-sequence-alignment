@@ -9,7 +9,6 @@ import memoryCC as mcc
 global log
 log = True
 
-# numSamplesPerPeriod is hard coded in SyncControllerPythonInterface and never updated
 global numSamplesPerPeriod
 numSamplesPerPeriod = 60
 
@@ -27,11 +26,16 @@ when we do not expect that. But we will handle that, so the Spim GUI shouldn't s
 Because the Spim GUI always ensures it has at least one fish profile, this oracle should operate transparently even when capturing a single-fish timelapse.
 '''
 
-# blank dict of LTU parameters that we only ever copy from and never update.
-blankLTUParameterDict = { 'resampledSequences' : [],
-                          'periodHistory' : [],
-                          'driftHistory' : [],
-                          'shifts' : []}
+def BlankLTUParameterDict():
+    # Blank dict of LTU parameters that we use for initialisation.
+    # Note that Daniel previously did dict(LTUParameterDict) where LTUParameterDict was a variable.
+    # This only did a shallow copy, which meant the list entries in the blank dict were being reused across fish!
+    return { 'resampledSequences' : [],
+              'periodHistory' : [],
+              'driftHistory' : [],
+              'shifts' : [],
+              'knownPhaseIndex' : -1,
+              'knownPhase' : 0 }
 
 # The nested dict / oracle containing the LTU parameters for multiple fish.
 # At startup we will not have any entries, but at least one should be added by the Spim GUI during its own startup
@@ -43,7 +47,7 @@ def isFishProfileInOracle(uniqueFishID):
 
 def addFishToOracle(uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == False):
-        multifishOracle[uniqueFishID] = dict(blankLTUParameterDict)
+        multifishOracle[uniqueFishID] = BlankLTUParameterDict()
     else:
         print(f'Unexpected: unique fish ID {uniqueFishID} is already in oracle')
     sys.stdout.flush()
@@ -51,7 +55,7 @@ def addFishToOracle(uniqueFishID):
 def addFishToOracleIfNeeded(uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == False):
         print(f'Adding unique fish ID {uniqueFishID} to the oracle')
-        multifishOracle[uniqueFishID] = dict(blankLTUParameterDict)
+        multifishOracle[uniqueFishID] = BlankLTUParameterDict()
     else:
         print(f'For information: unique fish ID {uniqueFishID} is already in oracle')
     sys.stdout.flush()
@@ -73,28 +77,46 @@ def removeFishFromOracle(uniqueFishID):
         del multifishOracle[uniqueFishID]
     sys.stdout.flush()
 
-def updateLTUParameters(resampledSequences, periodHistory, driftHistory,  shifts, uniqueFishID):
+def referencePhaseWasActivelySetForMostRecentSequence(fractionThroughSequence, uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == True):
+        print(f'Updating knownPhase for unique fish ID {uniqueFishID}')
+        multifishOracle[uniqueFishID]['knownPhaseIndex'] = len(multifishOracle[uniqueFishID]['resampledSequences']) - 1
+        multifishOracle[uniqueFishID]['knownPhase'] = fractionThroughSequence * numSamplesPerPeriod
+    else:
+        print(f'Unexpected: unique fish ID {uniqueFishID} is not in oracle. Will add new entry with null parameters')
+        addFishToOracle(uniqueFishID)
+    sys.stdout.flush()
+
+def updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == True):
         print(f'Updating LTU parameters for unique fish ID {uniqueFishID}')
-        parameterDict = {   'resampledSequences' : resampledSequences,
-                            'periodHistory' : periodHistory,
-                            'driftHistory' : driftHistory,
-                            'shifts' : shifts
-                         }
-        multifishOracle[uniqueFishID] = parameterDict
+        multifishOracle[uniqueFishID]['resampledSequences'] = resampledSequences
+        multifishOracle[uniqueFishID]['periodHistory'] = periodHistory
+        multifishOracle[uniqueFishID]['driftHistory'] = driftHistory
+        multifishOracle[uniqueFishID]['shifts'] = shifts
     else:
         print(f'Unexpected: unique fish ID {uniqueFishID} is not in oracle. Will add new entry and update parameters')
         addFishToOracle(uniqueFishID)
         updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID)
     sys.stdout.flush()
 
-def getLTUParameters(uniqueFishID):
+def get4LTUParameters(uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == True):
         ltuTuple = tuple(multifishOracle[uniqueFishID][key] for key in ['resampledSequences', 'periodHistory','driftHistory', 'shifts'])
     else:
         print(f'Unexpected: unique fish ID {uniqueFishID} was queried but is not in oracle. Will add new entry and return requested (empty) parameters')
         addFishToOracle(uniqueFishID)
-        ltuTuple = getLTUParameters(uniqueFishID)
+        ltuTuple = get4LTUParameters(uniqueFishID)
+    sys.stdout.flush()
+    return ltuTuple
+
+def get6LTUParameters(uniqueFishID):
+    if (isFishProfileInOracle(uniqueFishID) == True):
+        ltuTuple = tuple(multifishOracle[uniqueFishID][key] for key in ['resampledSequences', 'periodHistory','driftHistory', 'shifts', 'knownPhaseIndex', 'knownPhase'])
+    else:
+        print(f'Unexpected: unique fish ID {uniqueFishID} was queried but is not in oracle. Will add new entry and return requested (empty) parameters')
+        addFishToOracle(uniqueFishID)
+        ltuTuple = get6LTUParameters(uniqueFishID)
     sys.stdout.flush()
     return ltuTuple
 
@@ -104,25 +126,30 @@ def getLTUParameters(uniqueFishID):
 # ===================================================================================
 '''
 These functions call their respective functions in memoryCC for aligning reference sequences for timelapse imaging with 
-the addition of interfacing with the multifish oracle. Each of these functions follows a common pattern on being called: get the LTUparameters from the oracle;
-combine with new data coming in from the Obj C side and pass to the old MemoryCC functions; update LTUparameters in the oracle; return required parameters back to the Obj C side.
+the addition of interfacing with the multifish oracle. Each of these functions follows a common pattern on being called: 
+- get the LTUparameters from the oracle
+- combine with new data coming in from the Obj C side and pass to the old MemoryCC functions
+- update LTUparameters in the oracle
+- return required parameters back to the Obj C side.
 '''
 
-def processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, knownPhaseIndex, knownPhase, maxOffsetToConsider, uniqueFishID):
-    print(f'processNewReferenceSequence for unique fish ID {uniqueFishID}')
-    ltuParameters = getLTUParameters(uniqueFishID)
-    # we never actually use the residuals that get returned. Only the shiftSolution actually need by the LTU helper app
-    resampledSequences, periodHistory, driftHistory, shifts, shiftSolution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, knownPhaseIndex, knownPhase, numSamplesPerPeriod, maxOffsetToConsider)
+def getFractionalPhaseByAligningReferenceSequence(rawFrames, thisPeriod, thisDrift, maxOffsetToConsider, uniqueFishID):
+    print(f'getFractionalPhaseByAligningReferenceSequence for unique fish ID {uniqueFishID}')
+    ltuParameters = get6LTUParameters(uniqueFishID)
+    resampledSequences, periodHistory, driftHistory, shifts, shiftSolution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, numSamplesPerPeriod, maxOffsetToConsider)
+    print(f'getFractionalPhaseByAligningReferenceSequence completed for unique fish ID {uniqueFishID} (result {shiftSolution:.3f}, frac {(shiftSolution/numSamplesPerPeriod)%1.0:.3f})')
     updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID)
-    print(f'processNewReferenceSequence completed for unique fish ID {uniqueFishID} (result {shiftSolution})')
+    _ltuParameters = get6LTUParameters(uniqueFishID)
+    # Note that we never actually use the residuals that get returned.
+    # Only the shiftSolution is actually need by the LTU helper app
     sys.stdout.flush()
-    return shiftSolution
+    return (shiftSolution / numSamplesPerPeriod) % 1.0
 
 def trimLTUHistory(trimToLength, uniqueFishID):
     print(f'Trim LTU history for fish {uniqueFishID}')
-    ltuParameters = getLTUParameters(uniqueFishID)
+    ltuParameters = get4LTUParameters(uniqueFishID)
     returnTuple = mcc.trimLTUHistory(*ltuParameters, trimToLength)
-    updateLTUParameters(*returnTuple,uniqueFishID)
+    updateLTUParameters(*returnTuple, uniqueFishID)
     sys.stdout.flush()
 
 def RoIForReferenceHistory(uniqueFishID):
@@ -130,7 +157,7 @@ def RoIForReferenceHistory(uniqueFishID):
     # The tuple (-1,-1) is returned if the length of resampledSequences we pass in is zero.
     # If the fish ID doesn't exist then I think we should still create an entry in the oracle then recall the function.
     # This will still return (-1,-1) back to the obj C side BUT we wont crash by reading a non existent entry in the oracle.
-    ltuParameters = getLTUParameters(uniqueFishID)
+    ltuParameters = get4LTUParameters(uniqueFishID)
     roi = mcc.RoIForReferenceHistory(ltuParameters[0])
     sys.stdout.flush()
     return roi
@@ -148,10 +175,11 @@ So these functions are implemented here and are called by the Obj C side.
 
 def numRefFrameSetsInHistory(uniqueFishID):
     # Return number of sets of reference sequences in the list of resampledSequences
-    resampledSequences ,_ ,_, _= getLTUParameters(uniqueFishID)
+    resampledSequences,_,_,_ = get4LTUParameters(uniqueFishID)
     return len(resampledSequences)
 
 def resetRefFrameHistory(uniqueFishID):
-    # set the parameters for that entry in the oracle to an empty list
-    print(f'Reset ref frame history for fish {uniqueFishID}')
-    updateLTUParameters([],[],[],[], uniqueFishID)
+    # Clear the parameters for this fish's entry in the oracle
+    print(f'Reset ref frame history for fish {uniqueFishID} (was {numRefFrameSetsInHistory(uniqueFishID)} in history)')
+    multifishOracle[uniqueFishID] = BlankLTUParameterDict()
+    sys.stdout.flush()
