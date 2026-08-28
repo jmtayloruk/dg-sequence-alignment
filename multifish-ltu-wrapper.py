@@ -79,7 +79,7 @@ def removeFishFromOracle(uniqueFishID):
 
 def referencePhaseWasActivelySetForMostRecentSequence(fractionThroughSequence, uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == True):
-        print(f'Updating knownPhase for unique fish ID {uniqueFishID}')
+        print(f'Updating knownPhase for unique fish ID {uniqueFishID} to fraction {fractionThroughSequence} (val {fractionThroughSequence * numSamplesPerPeriod})')
         multifishOracle[uniqueFishID]['knownPhaseIndex'] = len(multifishOracle[uniqueFishID]['resampledSequences']) - 1
         multifishOracle[uniqueFishID]['knownPhase'] = fractionThroughSequence * numSamplesPerPeriod
     else:
@@ -143,6 +143,8 @@ def getFractionalPhaseByAligningReferenceSequence(rawFrames, thisPeriod, thisDri
     # Note that we never actually use the residuals that get returned.
     # Only the shiftSolution is actually need by the LTU helper app
     sys.stdout.flush()
+    if (shiftSolution == -1000.0):   # shape mismatch
+        return shiftSolution
     return (shiftSolution / numSamplesPerPeriod) % 1.0
 
 def trimLTUHistory(trimToLength, uniqueFishID):
