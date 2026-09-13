@@ -41,6 +41,43 @@ def BlankLTUParameterDict():
 # At startup we will not have any entries, but at least one should be added by the Spim GUI during its own startup
 multifishOracle = dict()
 
+
+def oracleDashboardRows():
+    """Return a small, read-only snapshot for the helper's oracle dashboard.
+
+    Keep this deliberately separate from get4LTUParameters/get6LTUParameters:
+    those accessors create missing fish as a recovery measure, whereas merely
+    displaying the dashboard must never change the oracle.
+
+    The returned values are limited to Python ints and None so the Objective-C
+    bridge never needs to inspect or copy any of the reference-frame arrays.
+    A corrupt field affects only its own cell in the dashboard.
+    """
+    if type(multifishOracle) is not dict:
+        raise TypeError('multifishOracle is not a dictionary')
+
+    rows = []
+    for uniqueFishID, parameters in list(dict.items(multifishOracle)):
+        displayFishID = uniqueFishID if type(uniqueFishID) is int else None
+
+        numReferenceSequences = None
+        knownPhaseIndex = None
+        if type(parameters) is dict:
+            resampledSequences = dict.get(parameters, 'resampledSequences', [])
+            if type(resampledSequences) in (list, tuple):
+                numReferenceSequences = len(resampledSequences)
+
+            candidateKnownPhaseIndex = dict.get(parameters, 'knownPhaseIndex', None)
+            if type(candidateKnownPhaseIndex) is int:
+                knownPhaseIndex = candidateKnownPhaseIndex
+
+        rows.append((displayFishID, numReferenceSequences, knownPhaseIndex))
+
+    # Fish IDs are normally integers. Any malformed-key rows remain visible at
+    # the end of the table with an unavailable marker in the ID column.
+    rows.sort(key=lambda row: (row[0] is None, row[0] if row[0] is not None else 0))
+    return rows
+
 # helper functions that are not called by the LTU App
 def isFishProfileInOracle(uniqueFishID):
     return (uniqueFishID in multifishOracle.keys())
