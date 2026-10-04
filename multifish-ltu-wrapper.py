@@ -235,6 +235,9 @@ the addition of interfacing with the multifish oracle. Each of these functions f
 '''
 
 def getFractionalPhaseByAligningReferenceSequence(rawFrames, thisPeriod, thisDrift, maxOffsetToConsider, uniqueFishID, stackStart=False):
+    # rawFrames is (frame, y, x); thisDrift is the (dx, dy) pixel displacement
+    # from the preceding reference sequence (positive right/down).
+    # Return target phase as a fraction of a cycle, or -1000.0 for shape mismatch.
     print(f'getFractionalPhaseByAligningReferenceSequence for unique fish ID {uniqueFishID}')
     ltuParameters = get6LTUParameters(uniqueFishID)
     resampledSequences, periodHistory, driftHistory, shifts, solution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, numSamplesPerPeriod, maxOffsetToConsider)

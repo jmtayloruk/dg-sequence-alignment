@@ -19,7 +19,7 @@ def threePointTriangularMinimum(y1, y2, y3):
 
 def crossCorrelationScores(seq1,
                            seq2):
-    '''Calculates cross correlation scores for two numpy arrays of order TXY'''
+    '''Calculate temporal cross-correlation scores for (frame, flattened pixels) arrays.'''
     # Calculate cross-correlation from JT codes
     temp = np.conj(np.fft.fft(seq1, axis=0)) * np.fft.fft(seq2, axis=0)
     temp2 = np.fft.ifft(temp, axis=0)
@@ -56,6 +56,8 @@ def matchSequenceSlicing(seq1,
     '''Take two sequences and resample them to match the longer sequence.'''
     newLength = max(len(seq1), len(seq2))
 
+    # Code review note (Oct 2026): the variable names x/y below denote array axes 1/2, actually image y/x!
+    # Interpolation preserves the input (frame, y, x) layout without transposing.
     x = np.arange(0.0, seq1.shape[1])
     y = np.arange(0.0, seq1.shape[2])
     z1 = np.arange(0.0, seq1.shape[0])
@@ -78,6 +80,7 @@ def resampleImageSection(seq1,
                          thisPeriod,
                          newLength):
     '''Modified version of j_postacquisition.periods.ResampleImageSection'''
+    # Input and return arrays are (frame, y, x); only the frame axis is resampled.
 
     result = np.zeros([newLength, seq1.shape[1], seq1.shape[2]], 'float')
     for i in range(newLength):

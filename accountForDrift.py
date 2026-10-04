@@ -7,19 +7,21 @@ import math
 from copy import copy
 
 def matchFrames(seq1,seq2,drift):
-    # user must provide drift (see period.txt files)
-    # Drift provided should be in the order (dx, dy).
-    # A positive value moves the object imaged in seq2 up/left to correct for drift
-    # JT note 2026: I don't think the x/y conventions are consistent throughout this file.
-    # For instance, the comment against rectF starts with X and then Y, but rectF[0] is modified by dy!
-    # But I am going to leave it because I believe that overall it functions as expected.
+    """Return overlapping crops of arrays shaped (frame, y, x).
+
+    drift is (dx, dy): displacement of seq2 relative to seq1 in pixels.
+    Positive dx/dy means the object moved right/down in seq2; cropping
+    aligns it by selecting pixels farther right/down in seq2.
+    Both returned arrays retain (frame, y, x) axis order.
+    This XY drift convention differs from the legacy shifts.py YX convention.
+    """
     dx = drift[0]
     dy = drift[1]
 
     # apply shifts
     # limit the drift that can be applied, to ensure we will always have at least one(!) pixel in each dimension
-    rectF = [0,seq1[0].shape[0],0,seq1[0].shape[1]]#X1,X2,Y1,Y2
-    rect = [0,seq2[0].shape[0],0,seq2[0].shape[1]]#X1,X2,Y1,Y2
+    rectF = [0,seq1[0].shape[0],0,seq1[0].shape[1]] # y1, y2, x1, x2
+    rect = [0,seq2[0].shape[0],0,seq2[0].shape[1]] # y1, y2, x1, x2
 
     dx = np.minimum(dx, seq1[0].shape[1] - 1)
     dx = np.maximum(dx, -(seq1[0].shape[1] - 1))

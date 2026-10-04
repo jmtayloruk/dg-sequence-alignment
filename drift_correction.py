@@ -1,6 +1,16 @@
+# Legacy offline drift estimation; the live LTU path uses drift supplied by
+# Objective-C and accountForDrift.matchFrames, rather than this module.
 from shifts import *
 
 def CorrectForDrift(resampledImageSections, numSamplesPerPeriod, maxDelta=1, inset=10):
+    """Estimate displacement relative to the first sequence, without moving pixels.
+
+    Each image has shape (y, x). Return one (dy, dx) pixel displacement per
+    sequence, starting with (0, 0). Positive values mean motion down/right.
+    maxDelta and inset are pixel limits applied independently to each axis.
+    The returned YX order matches shifts.GetShifts, but must be reversed
+    before passing to accountForDrift.matchFrames or the live LTU XY API.
+    """
     # This function corrects for any lateral movement that may have occurred between two sequences,
     # returning a list of the shifts that should be applied to each of the sequences we were passed.
     #
@@ -25,7 +35,7 @@ def CorrectForDrift(resampledImageSections, numSamplesPerPeriod, maxDelta=1, ins
     # Function works by comparing each sequence against the first one, and trying a small set of different drift values
     # to see which gives the lowest SAD correlation (having previously estimated the sync between the two sequences, to line them up correctly).
     # That optimum drift value is provided as the answer.
-    (iSize, jSize) = resampledImageSections[0][0].image.shape
+    (iSize, jSize) = resampledImageSections[0][0].image.shape # height (y), width (x)
     
     # TODO: for side-scan drift, I need to make an estimated correction at the image-loading stage (based on known z) on a per-image basis,
     # and only actually load a sub-window of the images (a sub-window that is expected to be approximately drift-corrected)

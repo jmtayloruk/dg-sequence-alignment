@@ -12,7 +12,7 @@ import warnings
 
 
 def RoIForReferenceHistory(resampledSequences):
-    # Return the shape of the reference history.
+    # Return (height, width), i.e. (y size, x size), or (-1, -1) for empty history.
     # We presume all have the same size (caller really should ensure this, or we will run into major problems!)
     if (len(resampledSequences) == 0):
         return (-1, -1)

@@ -10,6 +10,7 @@ import sys, time, warnings
 from tqdm import *
 
 def ScoreSequences(sec1, sec2, window1=None, window2=None):
+    # Images are (y, x); windows are (y start, x start, height, width), in pixels.
     # Utility function that returns a score for the level of correlation between two sequences
     # (which have already been time-shifted, if that's what we want to do)
     # Criterion is sum-squared-differences.
@@ -108,9 +109,18 @@ def ShiftScoresForSequences(seqA, seqB, numSamplesPerPeriod, window1=None, windo
     return scores
 
 def MakeOffsetWindow(iSize, jSize, inset, di, dj):
+    # iSize/di are height/y offset; jSize/dj are width/x offset, all in pixels.
+    # Return (y start, x start, height, width) for NumPy row/column slicing.
     return (inset+di, inset+dj, iSize-2*inset, jSize-2*inset)
 
 def ShiftScoresForSequencesWithDrift(seqA, seqB, drift, inset, numSamplesPerPeriod, useFFT=True):
+    """Return scores indexed by temporal phase shift, accounting for spatial drift.
+
+    Images have shape (y, x). drift is (dy, dx), the pixel displacement of
+    seqB relative to seqA; positive values move seqB's window down/right.
+    This legacy YX convention differs from accountForDrift.matchFrames and
+    the live LTU API, which take (dx, dy).
+    """
     (iSize, jSize) = seqA[0].image.shape
     window1 = MakeOffsetWindow(iSize, jSize, inset, 0, 0)
     window2 = MakeOffsetWindow(iSize, jSize, inset, drift[0], drift[1])
@@ -140,6 +150,9 @@ def FindMinimum(scores):
 
 
 def GetShifts(resampledImageSections, sectionPeriods, sequenceDrifts, inset, numSamplesPerPeriod, maxOffsetToConsider=None, useFFT=True):
+    # sequenceDrifts contains (dy, dx) pixel displacements relative to a common
+    # origin, as returned by CorrectForDrift. Returned (i, j, phaseShift, score)
+    # tuples contain temporal shifts in samples, not spatial coordinates.
     # Determine the best possible relative alignments (time shifts) of different image sections,
     # as part of synchronization/phase assignment analysis.
 

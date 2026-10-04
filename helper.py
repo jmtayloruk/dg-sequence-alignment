@@ -5,7 +5,7 @@ import numpy as np
 from pprint import pprint
 
 def convertObj(sequenceObj,timestamp='time_processing_started', sortByTimestamp=True):
-    # Convert to 3D numpy array (ZXY), assumes correctly sorted
+    # Convert to a 3D NumPy array (frame, y, x), preserving image axis order.
     # Works for new image_class v3 (multipage tiffs)
     # Should work for old formats
     if type(sequenceObj) is tuple:

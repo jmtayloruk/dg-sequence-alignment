@@ -33,7 +33,7 @@ def processNewReferenceSequence(rawRefFrames,
     ''' Adapted from j_postacquisition.maintain_ref_frame_alignment
 
     Inputs:
-    * rawRefFrames: a PxMxN numpy array representing the new reference frames
+    * rawRefFrames: a (frame, y, x) numpy array representing the new reference frames
       (or a list of numpy arrays representing the new reference frames)
     * thisPeriod: the period for rawRefFrames (caller must determine the period)
     * thisDrift: the drift for rawRefFrames, in (x,y) order (caller must determine the drift).
@@ -52,7 +52,7 @@ def processNewReferenceSequence(rawRefFrames,
     Outputs:
     * resampledSequences: updated list of resampled reference frames
     * periodHistory: updated list of the periods for resampledSequences
-    * driftHistory: updated list of the drifts for resampledSequences
+    * driftHistory: updated accumulated drift list, retaining (dx, dy) order
       * if no drift correction is used, this is a dummy variable
     * shifts: updated list of shifts calculated for resampledSequences
     * globalShiftSolution: solved target phase for every reference sequence;
@@ -198,7 +198,7 @@ def processNewReferenceSequence(rawRefFrames,
 
 def RoIForReferenceHistory(resampledSequences):
     # This fuction has been relocated from j_postacquisition/maintain_ref_frame_alignment given this is the only function called by the LTU
-    # Return the shape of the reference history.
+    # Return (height, width), i.e. (y size, x size), or (-1, -1) for empty history.
     # We presume all have the same size (caller really should ensure this, or we will run into major problems!)
     if (len(resampledSequences) == 0):
         return (-1, -1)
