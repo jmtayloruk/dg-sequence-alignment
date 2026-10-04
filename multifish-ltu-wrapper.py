@@ -24,6 +24,56 @@ That means we can print an "Unexpected: ..." message if we ever find a uniqueFis
 when we do not expect that. But we will handle that, so the Spim GUI shouldn't see any impact
 (beyond potentially degradation of LTU performance for that fish).
 Because the Spim GUI always ensures it has at least one fish profile, this oracle should operate transparently even when capturing a single-fish timelapse.
+
+Each fish's inner dictionary contains the following keys.
+Sequence indices are zero-based positions in resampledSequences.
+All target phases and phase offsets are in resampled units (numSamplesPerPeriod samples per heartbeat),
+rather than raw camera-frame units.
+
+resampledSequences:
+    Reference image sequence, representing a single heartbeat resampled with
+    numSamplesPerPeriod samples. These are the sequences to be aligned.
+periodHistory:
+    The original heartbeat period, in camera frames, for each reference sequence.
+    The alignment solver operates on the common resampled cycle length rather than these individual periods.
+driftHistory:
+    Accumulated XY drift in pixels, in (x, y) order, for each reference sequence.
+    The difference between two entries is used to apply drift correction (if enabled)
+    during the sequence-alignment process.
+shifts:
+    Pairwise alignment constraints (i, j, shift, score), normally with i < j.
+    shift is the measured phase difference from sequence i to sequence j,
+    wrapped to the resampled cycle. score is a metric of image mismatch; lower scores
+    receive greater weight in the solver. Together these constraints are solved
+    to determine the target phases across the history.
+knownPhaseIndex, knownPhase:
+    The reference sequence and target phase that anchor the alignment solution.
+    If the user manually selects a new reference sequence this anchors the most recent sequence;
+    the initial suggested target is also recorded this way.
+    knownPhaseIndex starts at -1, which selects the latest sequence while the first reference is established.
+lastStackStartIndex:
+    The most recent reference successfully acquired by the standard refresh at
+    the start of a z stack.
+    When doing a z scan with a standard brightfield view (with changing focus),
+    e.g. on a standard confocal microscope, we refresh the sync at regular intervals
+    during a z scan. Then once the scan is complete we trim the history back to
+    lastStackStartIndex
+    None means no such boundary has yet been recorded, so a trim request would leave all history intact.
+stackStartPhase:
+    The equivalent target phase for lastStackStartIndex, cached from each refresh's
+    existing solution and updated when the target is explicitly changed.
+    We keep track of this for the unusual case where trimming removes the current anchor sequence
+    (this should only happen if the user manually changes the target phase part-way through a z scan).
+    If that happens, we apply this as the new knownPhase, to replace the one we have lost through trimming.
+stackStartPhaseOffset:
+    The solved phase at lastStackStartIndex minus the solved phase at the most
+    recent sequence, modulo numSamplesPerPeriod. Adding it to a newly selected
+    target on the most recent sequence updates stackStartPhase without another
+    alignment solve being required. After trimming, both sequences are the boundary, so it is 0.
+    Both cached phase values are None until a stack-start boundary is recorded.
+
+The oracle retains only these two cached phase scalars, not the full solution
+array. Clearing a fish's history clears its boundary, anchor and caches together.
 '''
 
 def BlankLTUParameterDict():
@@ -35,7 +85,10 @@ def BlankLTUParameterDict():
               'driftHistory' : [],
               'shifts' : [],
               'knownPhaseIndex' : -1,
-              'knownPhase' : 0 }
+              'knownPhase' : 0,
+              'lastStackStartIndex' : None,
+              'stackStartPhase' : None,
+              'stackStartPhaseOffset' : None }
 
 # The nested dict / oracle containing the LTU parameters for multiple fish.
 # At startup we will not have any entries, but at least one should be added by the Spim GUI during its own startup
@@ -117,8 +170,19 @@ def removeFishFromOracle(uniqueFishID):
 def referencePhaseWasActivelySetForMostRecentSequence(fractionThroughSequence, uniqueFishID):
     if (isFishProfileInOracle(uniqueFishID) == True):
         print(f'Updating knownPhase for unique fish ID {uniqueFishID} to fraction {fractionThroughSequence} (val {fractionThroughSequence * numSamplesPerPeriod})')
-        multifishOracle[uniqueFishID]['knownPhaseIndex'] = len(multifishOracle[uniqueFishID]['resampledSequences']) - 1
-        multifishOracle[uniqueFishID]['knownPhase'] = fractionThroughSequence * numSamplesPerPeriod
+        parameters = multifishOracle[uniqueFishID]
+        parameters['knownPhaseIndex'] = len(parameters['resampledSequences']) - 1
+        parameters['knownPhase'] = fractionThroughSequence * numSamplesPerPeriod
+        if parameters['lastStackStartIndex'] is not None:
+            # This selection changes the target on the most recent reference,
+            # which may later be discarded as an in-stack refresh. Preserve the
+            # equivalent target in the retained stack-start reference as well.
+            # The latest alignment already supplied the relative phase offset
+            # between those sequences; changing the target does not change that
+            # offset, so adding it gives the new fallback without another solve.
+            # This updates only the cache: the selected sequence remains the
+            # anchor unless a later trim actually removes it.
+            parameters['stackStartPhase'] = (parameters['knownPhase'] + parameters['stackStartPhaseOffset']) % numSamplesPerPeriod
     else:
         print(f'Unexpected: unique fish ID {uniqueFishID} is not in oracle. Will add new entry with null parameters')
         addFishToOracle(uniqueFishID)
@@ -170,25 +234,70 @@ the addition of interfacing with the multifish oracle. Each of these functions f
 - return required parameters back to the Obj C side.
 '''
 
-def getFractionalPhaseByAligningReferenceSequence(rawFrames, thisPeriod, thisDrift, maxOffsetToConsider, uniqueFishID):
+def getFractionalPhaseByAligningReferenceSequence(rawFrames, thisPeriod, thisDrift, maxOffsetToConsider, uniqueFishID, stackStart=False):
     print(f'getFractionalPhaseByAligningReferenceSequence for unique fish ID {uniqueFishID}')
     ltuParameters = get6LTUParameters(uniqueFishID)
-    resampledSequences, periodHistory, driftHistory, shifts, shiftSolution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, numSamplesPerPeriod, maxOffsetToConsider)
+    resampledSequences, periodHistory, driftHistory, shifts, solution, _ = mcc.processNewReferenceSequence(rawFrames, thisPeriod, thisDrift, *ltuParameters, numSamplesPerPeriod, maxOffsetToConsider)
+    if solution is None:   # shape mismatch: leave the boundary and caches intact
+        sys.stdout.flush()
+        return -1000.0
+    shiftSolution = float(solution[-1])
     print(f'getFractionalPhaseByAligningReferenceSequence completed for unique fish ID {uniqueFishID} (result {shiftSolution:.3f}, frac {(shiftSolution/numSamplesPerPeriod)%1.0:.3f})')
     updateLTUParameters(resampledSequences, periodHistory, driftHistory, shifts, uniqueFishID)
-    _ltuParameters = get6LTUParameters(uniqueFishID)
+    parameters = multifishOracle[uniqueFishID]
+    if stackStart:
+        # The acquisition notification identifies this particular refresh as a
+        # stack start. Only record its new history index after alignment has
+        # succeeded; ordinary/manual refreshes must not move the trim boundary.
+        parameters['lastStackStartIndex'] = len(resampledSequences) - 1
+    boundary = parameters['lastStackStartIndex']
+    if boundary is not None:
+        # Every successful refresh refines the equivalent target phase at the
+        # boundary. Cache it now, while the full solution is available, for use
+        # if a future trim discards the anchored sequence. Also cache the phase
+        # difference to the newest sequence so a later explicit target selection
+        # can update the fallback by scalar arithmetic. Neither operation changes
+        # knownPhaseIndex/knownPhase, and no additional alignment solve is needed.
+        # For a newly recorded boundary, boundary is the newest index and its
+        # offset is zero. With no boundary, trimming is a no-op and no cache is needed.
+        parameters['stackStartPhase'] = float(solution[boundary]) % numSamplesPerPeriod
+        parameters['stackStartPhaseOffset'] = (float(solution[boundary]) - shiftSolution) % numSamplesPerPeriod
     # Note that we never actually use the residuals that get returned.
-    # Only the shiftSolution is actually need by the LTU helper app
+    # Only the newest solved phase is returned to the LTU helper app. The full
+    # solution is temporary; the oracle retains only the boundary and two scalars.
     sys.stdout.flush()
-    if (shiftSolution == -1000.0):   # shape mismatch
-        return shiftSolution
     return (shiftSolution / numSamplesPerPeriod) % 1.0
 
-def trimLTUHistory(trimToLength, uniqueFishID):
+def trimLTUHistory(uniqueFishID):
     print(f'Trim LTU history for fish {uniqueFishID}')
     ltuParameters = get4LTUParameters(uniqueFishID)
+    parameters = multifishOracle[uniqueFishID]
+    boundary = parameters['lastStackStartIndex']
+    if boundary is None:
+        print(f'Warning: no stack-start reference recorded for fish {uniqueFishID}; leaving LTU history unchanged', flush=True)
+        return
+    if not 0 <= boundary < len(ltuParameters[0]):
+        raise ValueError(f'Invalid stack-start reference index {boundary} for fish {uniqueFishID}')
+    trimToLength = boundary + 1
+    anchorWillBeRemoved = parameters['knownPhaseIndex'] >= trimToLength
+    # Normal calls cannot leave a recorded boundary without a cached phase:
+    # the successful refresh that records it fills both caches in the same call,
+    # and resetting history clears all three together. Guard against inconsistent
+    # state from an incomplete/failed update before discarding the anchor.
+    if anchorWillBeRemoved and parameters['stackStartPhase'] is None:
+        raise ValueError(f'No cached stack-start target phase for fish {uniqueFishID}')
     returnTuple = mcc.trimLTUHistory(*ltuParameters, trimToLength)
     updateLTUParameters(*returnTuple, uniqueFishID)
+    if anchorWillBeRemoved:
+        print(f"Warning: trimming away phase anchor {parameters['knownPhaseIndex']} for fish {uniqueFishID}; transferring target to stack-start reference {boundary} at phase {parameters['stackStartPhase']}")
+        parameters['knownPhaseIndex'] = boundary
+        parameters['knownPhase'] = parameters['stackStartPhase']
+    # Explicit target selections always refer to the most recent sequence in the
+    # oracle. After trimming, that sequence is the stack-start boundary itself,
+    # so a selection maps directly to stackStartPhase (no phase difference to add).
+    # Discard the old offset to the removed latest sequence; the next successful
+    # refresh will compute the offset to its newly appended sequence instead.
+    parameters['stackStartPhaseOffset'] = 0.0
     sys.stdout.flush()
 
 def RoIForReferenceHistory(uniqueFishID):

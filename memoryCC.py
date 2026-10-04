@@ -55,7 +55,8 @@ def processNewReferenceSequence(rawRefFrames,
     * driftHistory: updated list of the drifts for resampledSequences
       * if no drift correction is used, this is a dummy variable
     * shifts: updated list of shifts calculated for resampledSequences
-    * globalShiftSolution[-1]: roll factor for latest reference frames
+    * globalShiftSolution: solved target phase for every reference sequence;
+      None if the new frames have an incompatible shape
     * residuals: residuals on least squares solution'''
 
     # Deal with rawRefFrames type
@@ -74,7 +75,7 @@ def processNewReferenceSequence(rawRefFrames,
                     periodHistory,
                     driftHistory,
                     shifts,
-                    -1000.0,
+                    None,
                     None)
     # And that shape is compatible with the history that we already have
     if len(resampledSequences) >= 1:
@@ -88,7 +89,7 @@ def processNewReferenceSequence(rawRefFrames,
                     periodHistory,
                     driftHistory,
                     shifts,
-                    -1000.0,
+                    None,
                     None)
 
     if log:
@@ -192,7 +193,7 @@ def processNewReferenceSequence(rawRefFrames,
             periodHistory,
             driftHistory,
             shifts,
-            globalShiftSolution[-1],
+            globalShiftSolution,
             residuals)
 
 def RoIForReferenceHistory(resampledSequences):
@@ -208,7 +209,8 @@ def trimLTUHistory(resampledSequences,
                     driftHistory,
                     shifts,
                     trimToLength):
-    assert(len(resampledSequences) >= trimToLength)
+    if not 0 <= trimToLength <= len(resampledSequences):
+        raise ValueError('Trim length must be between zero and the reference history length')
     print(f"Trimming from initial sequence length {len(resampledSequences)} ({len(shifts)} shifts)")
     print(shifts)
     resampledSequences = resampledSequences[:trimToLength]
@@ -281,14 +283,16 @@ if __name__ == '__main__':
         seq2 = np.repeat(np.repeat(seq2, width, 1), height, 2)
 
         # Run MCC without Drift
-        resampledSequences, periodHistory, driftHistory, shifts, rollFactor, residuals = processNewReferenceSequence(seq2, thisPeriod, None, resampledSequences, periodHistory, driftHistory, shifts, knownPhaseIndex=0, knownPhase=0, numSamplesPerPeriod=80, maxOffsetToConsider=3, log=True)
+        resampledSequences, periodHistory, driftHistory, shifts, solution, residuals = processNewReferenceSequence(seq2, thisPeriod, None, resampledSequences, periodHistory, driftHistory, shifts, knownPhaseIndex=0, knownPhase=0, numSamplesPerPeriod=80, maxOffsetToConsider=3, log=True)
+        rollFactor = solution[-1]
 
         # Outputs for toy examples
         seqOut = (seq1+rollFactor) % thisPeriod
         print('Aligned Sequence (wout Drift): {0}'.format(seqOut))
 
         # Run MCC with Drift of [0,0]
-        resampledSequencesDrift, periodHistoryDrift, driftHistoryDrift, shiftsDrift, rollFactor, residuals = processNewReferenceSequence(seq2, thisPeriod, [0, 0], resampledSequencesDrift, periodHistoryDrift, driftHistoryDrift, shiftsDrift, knownPhaseIndex=0, knownPhase=0, numSamplesPerPeriod=80, maxOffsetToConsider=3, log=True)
+        resampledSequencesDrift, periodHistoryDrift, driftHistoryDrift, shiftsDrift, solution, residuals = processNewReferenceSequence(seq2, thisPeriod, [0, 0], resampledSequencesDrift, periodHistoryDrift, driftHistoryDrift, shiftsDrift, knownPhaseIndex=0, knownPhase=0, numSamplesPerPeriod=80, maxOffsetToConsider=3, log=True)
+        rollFactor = solution[-1]
 
         # Outputs for toy examples
         seqOut = (seq1+rollFactor) % thisPeriod
